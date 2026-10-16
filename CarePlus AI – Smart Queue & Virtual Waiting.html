@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CarePlus AI – Smart Queue & Virtual Waiting</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--bg:#f3f6fa;--card:#fff;--ink:#14263d;--mut:#5b6b80;--line:#d3dde9;--brand:#2f6fb0;--head:#46739f;--acc:#ffc000;--bad:#c62828;--ok:#2e7d32;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1823;--card:#182535;--ink:#e6eef8;--mut:#9fb0c4;--line:#2b3d52;--brand:#6aa7e6;--head:#1f3a58;--bad:#ef6a6a;--ok:#6fcf74}}
+:root[data-theme="dark"]{--bg:#0f1823;--card:#182535;--ink:#e6eef8;--mut:#9fb0c4;--line:#2b3d52;--brand:#6aa7e6;--head:#1f3a58;--bad:#ef6a6a;--ok:#6fcf74}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,Roboto,sans-serif}
+header{background:var(--head);color:#fff;padding:14px 16px 0}
+h1{margin:0;font:700 22px/1.2 Georgia,"Noto Serif",serif}h1 small{display:block;font:400 13px "Segoe UI",sans-serif;opacity:.85;margin-top:2px}
+nav{display:flex;gap:4px;margin-top:12px;overflow-x:auto}
+nav button{background:transparent;color:#fff;border:0;padding:10px 14px;font:600 14px inherit;cursor:pointer;border-radius:8px 8px 0 0;white-space:nowrap}
+nav button.on{background:var(--bg);color:var(--ink)}
+main{max-width:880px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+h2{margin:0 0 10px;font:700 17px Georgia,serif}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 3px}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+button.b{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 16px;font:600 14px inherit;cursor:pointer}
+button.b.y{background:var(--acc);color:#1a1a1a}button.b.r{background:var(--bad)}button.b.g{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.grow{flex:1}
+.tok{font:700 56px/1 Georgia,serif;color:var(--brand)}
+.big{font:700 34px/1.1 Georgia,serif}.mut{color:var(--mut);font-size:13px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:10px}.stat b{display:block;font:700 22px Georgia,serif}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.chip.w{background:#e8f1fb;color:#1c4f86}.chip.c{background:#fff3cd;color:#6b4e00}.chip.e{background:#fde4e4;color:var(--bad);border-color:var(--bad)}.chip.d{background:#e3f4e4;color:#1f6b25}
+.q{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}.q:first-of-type{border-top:0}
+.q .n{font:700 20px Georgia,serif;width:46px;color:var(--brand)}
+.bar{height:8px;background:var(--line);border-radius:9px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;background:var(--acc)}
+.msg{border-left:4px solid var(--ok);padding:8px 12px;margin:8px 0;background:var(--bg);border-radius:0 8px 8px 0}.msg.wa{border-color:#25d366}.msg.sm{border-color:var(--brand)}
+#qr{display:inline-block;padding:10px;background:#fff;border-radius:8px}
+.hide{display:none}
+</style></head><body>
+<header><h1>CarePlus AI<small>Don’t wait in the queue. Know when to come.</small></h1>
+<nav id="nav"></nav></header>
+<main id="app"></main>
+<script>
+const TYPES={"New patient":12,"Follow-up":7,"Routine check-up":9,"Procedure / injection":15,"Emergency":14};
+const T0=Date.now();                      // 1 real second = 1 clinic minute (demo clock)
+let S={q:[],notes:[],model:{...TYPES},n:{},seq:0,sel:null,done:[],tab:"patient",chan:"WhatsApp"};
+try{const x=JSON.parse(localStorage.getItem("careplus")||"null");if(x&&x.v===1)S=x.s}catch(e){}
+const save=()=>{try{localStorage.setItem("careplus",JSON.stringify({v:1,s:S}))}catch(e){}};
+const $=s=>document.querySelector(s);
+const mins=()=> (Date.now()-T0)/1000;
+const clock=m=>{const t=540+Math.round(m);return String(Math.floor(t/60)%24).padStart(2,"0")+":"+String(t%60).padStart(2,"0")};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---- AI wait-time model: online-learning estimate per visit type (EMA of real consult times) ---- */
+const pred=p=>Math.max(3,Math.round(S.model[p.type]||10));
+const learn=(type,d)=>{S.n[type]=(S.n[type]||0)+1;S.model[type]=S.model[type]*0.7+d*0.3};
+const cur=()=>S.q.find(p=>p.st==="consulting");
+const waiting=()=>S.q.filter(p=>p.st==="waiting").sort((a,b)=>(b.em-a.em)||(a.seq-b.seq));
+function ahead(p){const w=waiting(),i=w.indexOf(p),c=cur();let list=w.slice(0,i),wait=0;
+ if(c){wait+=Math.max(1,pred(c)-(mins()-c.t0));list=[c,...list]}
+ list.forEach(x=>{if(x!==c)wait+=pred(x)});return{n:list.length,wait:Math.round(wait)}}
+function note(p,text){S.notes.unshift({id:++S.seq+"n",to:p.name,ph:p.phone,ch:S.chan,text,at:clock(mins())});S.notes=S.notes.slice(0,40)}
+
+function join(name,phone,type,em){const p={id:"p"+(++S.seq),token:"T"+String(S.seq).padStart(3,"0"),seq:S.seq,name,phone,type:em?"Emergency":type,em:em?1:0,st:"waiting",away:false,warned:false,join:mins(),est0:0};
+ S.q.push(p);p.est0=ahead(p).wait;
+ note(p,`Hi ${name}, your token is ${p.token}. Estimated wait ~${p.est0} min. You can step away – we will message you.`);
+ if(em){waiting().filter(x=>x!==p).forEach(x=>{if(x.away){note(x,`Queue update: an emergency case was added. Your new wait is ~${ahead(x).wait} min, come back at ${clock(mins()+ahead(x).wait)}.`)}})}
+ S.sel=p.id;save();render()}
+function setEm(id){const p=S.q.find(x=>x.id===id);if(!p||p.st!=="waiting")return;p.em=1;
+ waiting().filter(x=>x!==p).forEach(x=>{if(x.away)note(x,`Queue recalculated for an emergency. New wait ~${ahead(x).wait} min.`)});save();render()}
+function callNext(){if(cur()||!waiting().length)return;const p=waiting()[0];p.st="consulting";p.t0=mins();note(p,`${p.name}, the doctor is ready for you now. Please come in (${p.token}).`);save();render()}
+function finish(){const c=cur();if(!c)return;const d=Math.max(1,mins()-c.t0);c.st="done";c.dur=d;if(c.type!=="Emergency"||true)learn(c.type,d);S.done.push(c);S.q=S.q.filter(x=>x!==c);save();render()}
+function tick(){let ch=false;waiting().forEach(p=>{const a=ahead(p);if(p.away&&!p.warned&&a.n<=2){p.warned=true;ch=true;note(p,`Your turn is near – ${a.n} ahead of you (~${a.wait} min). Please return to the clinic now and check in.`)}});
+ if(ch)save();const f=document.activeElement;if(f&&/INPUT|SELECT/.test(f.tagName))return;render(true)}
+
+/* ---- views ---- */
+const chip=p=>p.st==="consulting"?'<span class="chip c">In consultation</span>':p.em?'<span class="chip e">Emergency</span>':'<span class="chip w">Waiting</span>';
+function vPatient(){const act=S.q;const p=act.find(x=>x.id===S.sel)||null;
+ const sel=`<label for="who">Viewing as</label><select id="who"><option value="">New patient…</option>${act.map(x=>`<option value="${x.id}" ${p&&p.id===x.id?"selected":""}>${x.token} – ${esc(x.name)}</option>`).join("")}</select>`;
+ if(!p)return`<div class="card"><h2>Scan the clinic QR to get your token</h2><p class="mut">Open the Clinic QR tab to see the code. Use the form below to simulate the scan.</p>${sel}
+ <label for="nm">Your name</label><input id="nm" autocomplete="off"><label for="ph">Mobile number</label><input id="ph" inputmode="tel" placeholder="98XXXXXXXX">
+ <label for="ty">Reason for visit</label><select id="ty">${Object.keys(TYPES).filter(k=>k!=="Emergency").map(k=>`<option>${k}</option>`).join("")}</select>
+ <label><input type="checkbox" id="em" style="width:auto"> This is an emergency</label>
+ <div class="row" style="margin-top:12px"><button class="b" data-a="join">Get my token</button></div></div>`;
+ if(p.st==="done")return`<div class="card">${sel}</div>`;
+ const a=ahead(p),pct=Math.max(4,Math.min(100,100*(1-a.wait/Math.max(p.est0,a.wait,1))));
+ return`<div class="card">${sel}</div><div class="card"><div class="row"><div class="tok">${p.token}</div><div class="grow"><b>${esc(p.name)}</b><br>${chip(p)} <span class="mut">${esc(p.type)}</span></div></div>
+ ${p.st==="consulting"?'<p class="big" style="margin:14px 0 0">It’s your turn – please go in.</p>':`<div class="stats" style="margin-top:14px"><div class="stat"><span class="mut">Estimated wait</span><b>~${a.wait} min</b></div><div class="stat"><span class="mut">Come back at</span><b>${clock(mins()+a.wait)}</b></div><div class="stat"><span class="mut">Patients ahead</span><b>${a.n}</b></div></div><div class="bar"><i style="width:${pct}%"></i></div>
+ <div class="row" style="margin-top:14px"><button class="b ${p.away?"g":"y"}" data-a="away" data-id="${p.id}">${p.away?"I’m back at the clinic":"Step away (virtual waiting)"}</button></div>
+ <p class="mut">${p.away?"You are waiting virtually. We will message you when about 2 patients are ahead.":"Stay in the clinic or step away – the estimate updates by itself when the queue changes."}</p>`}</div>
+ <div class="card"><h2>Messages to your phone</h2>${S.notes.filter(n=>n.to===p.name).map(n=>`<div class="msg ${n.ch==="SMS"?"sm":"wa"}"><span class="mut">${n.ch} · ${n.at}</span><br>${esc(n.text)}</div>`).join("")||'<p class="mut">No messages yet.</p>'}</div>`}
+
+function vDoctor(){const c=cur(),w=waiting(),avg=S.done.length?Math.round(S.done.reduce((s,x)=>s+x.dur,0)/S.done.length):"–";
+ return`<div class="stats card"><div class="stat"><span class="mut">Waiting</span><b>${w.length}</b></div><div class="stat"><span class="mut">Served today</span><b>${S.done.length}</b></div><div class="stat"><span class="mut">Avg consult</span><b>${avg}${avg==="–"?"":" min"}</b></div><div class="stat"><span class="mut">Clinic time</span><b>${clock(mins())}</b></div></div>
+ <div class="card"><h2>Now consulting</h2>${c?`<div class="row"><div class="tok" style="font-size:36px">${c.token}</div><div class="grow"><b>${esc(c.name)}</b> ${chip(c)}<br><span class="mut">${esc(c.type)} · ${Math.round(mins()-c.t0)} of ~${pred(c)} min</span></div><button class="b y" data-a="finish">Finish consultation</button></div>`:`<div class="row"><span class="mut grow">No one in consultation.</span><button class="b" data-a="next" ${w.length?"":"disabled"}>Call next patient</button></div>`}</div>
+ <div class="card"><div class="row"><h2 class="grow" style="margin:0">Queue</h2><button class="b r" data-a="walkin">+ Emergency walk-in</button></div>
+ ${w.map((p,i)=>`<div class="q"><div class="n">${p.token}</div><div class="grow"><b>${esc(p.name)}</b> ${chip(p)}${p.away?' <span class="chip d">Away</span>':""}<br><span class="mut">${esc(p.type)} · est. ${ahead(p).wait} min</span></div>${p.em?"":`<button class="b g" data-a="em" data-id="${p.id}">Mark emergency</button>`}</div>`).join("")||'<p class="mut">The queue is empty.</p>'}</div>
+ <div class="card"><h2>What the AI model has learned</h2><p class="mut">Predicted minutes per visit type. Each finished consultation updates the estimate.</p>${Object.keys(TYPES).map(k=>`<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding:6px 0"><span>${k}</span><b>${Math.round(S.model[k])} min <span class="mut">(${S.n[k]||0} learned)</span></b></div>`).join("")}</div>`}
+
+function vNotes(){return`<div class="card"><h2>Notification log</h2><label for="ch">Send through</label><select id="ch"><option ${S.chan==="WhatsApp"?"selected":""}>WhatsApp</option><option ${S.chan==="SMS"?"selected":""}>SMS</option></select>
+ <p class="mut">Demo mode shows messages here. In production the backend sends them to the patient’s number.</p>${S.notes.map(n=>`<div class="msg ${n.ch==="SMS"?"sm":"wa"}"><span class="mut">${n.ch} · ${n.at} · to ${esc(n.to)} ${esc(n.ph||"")}</span><br>${esc(n.text)}</div>`).join("")||'<p class="mut">Nothing sent yet.</p>'}</div>`}
+
+function vQR(){return`<div class="card" style="text-align:center"><h2>Clinic QR code</h2><div id="qr"></div><p class="mut">Print this and place it at the reception. Patients scan it to receive a digital token.</p><button class="b" data-a="demo">Add 4 demo patients</button> <button class="b g" data-a="reset">Reset all data</button></div>`}
+
+const TABS={patient:["Patient",vPatient],doctor:["Doctor dashboard",vDoctor],notes:["Notifications",vNotes],qr:["Clinic QR",vQR]};
+function render(soft){$("#nav").innerHTML=Object.entries(TABS).map(([k,v])=>`<button class="${S.tab===k?"on":""}" data-tab="${k}">${v[0]}</button>`).join("");
+ $("#app").innerHTML=TABS[S.tab][1]();
+ if(S.tab==="qr"&&window.QRCode){new QRCode($("#qr"),{text:location.href,width:180,height:180})}}
+document.addEventListener("click",e=>{const t=e.target.closest("[data-tab],[data-a]");if(!t)return;
+ if(t.dataset.tab){S.tab=t.dataset.tab;save();return render()}
+ const a=t.dataset.a,id=t.dataset.id;
+ if(a==="join"){const n=$("#nm").value.trim();if(!n){$("#nm").focus();return}join(n,$("#ph").value.trim(),$("#ty").value,$("#em").checked)}
+ if(a==="away"){const p=S.q.find(x=>x.id===id);p.away=!p.away;if(p.away){p.warned=false;note(p,`You are now waiting virtually. Expected return time ${clock(mins()+ahead(p).wait)}.`)}save();render()}
+ if(a==="next")callNext();if(a==="finish")finish();if(a==="em")setEm(id);
+ if(a==="walkin"){join("Walk-in emergency","", "Emergency",true);S.tab="doctor";render()}
+ if(a==="demo"){[["Asha Patil","New patient"],["Ravi Shinde","Follow-up"],["Meena Jadhav","Routine check-up"],["Sunil More","Procedure / injection"]].forEach(([n,t])=>join(n,"9800000000",t,false));S.sel=null;S.tab="doctor";render()}
+ if(a==="reset"&&confirm("Clear the queue, messages and learned data?")){S={q:[],notes:[],model:{...TYPES},n:{},seq:0,sel:null,done:[],tab:"qr",chan:S.chan};save();render()}});
+document.addEventListener("change",e=>{if(e.target.id==="who"){S.sel=e.target.value||null;save();render()}if(e.target.id==="ch"){S.chan=e.target.value;save()}});
+render();setInterval(tick,1000);
+</script></body></html>
